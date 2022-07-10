@@ -15,4 +15,7 @@ BDEPEND="virtual/pkgconfig"
 
 DEPEND="sys-libs/ncurses:=[unicode(+)]"
 
-RDEPEND="${DEPEND}"
+RDEPEND="
+	${DEPEND}
+	!!sys-fs/ncdu-bin
+"

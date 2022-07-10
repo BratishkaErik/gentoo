@@ -12,7 +12,10 @@ SLOT="0"
 KEYWORDS="~amd64"
 
 DEPEND="sys-libs/ncurses:=[unicode(+)]"
-RDEPEND="${DEPEND}"
+RDEPEND="
+	${DEPEND}
+	!!sys-fs/ncdu-bin
+"
 BDEPEND="
 	~dev-lang/zig-0.9.1
 	virtual/pkgconfig
