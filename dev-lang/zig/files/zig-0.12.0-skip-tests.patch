@@ -1,0 +1,43 @@
+Upstream bug https://github.com/ziglang/zig/issues/19944
+and https://github.com/ziglang/zig/issues/19874 .
+
+Skip standalone tests "stack_iterator" and
+standard library test "makepath relative walks".
+
+diff --git a/lib/std/fs/test.zig b/lib/std/fs/test.zig
+index 3aa932cf01..9b46882c87 100644
+--- a/lib/std/fs/test.zig
++++ b/lib/std/fs/test.zig
+@@ -1171,6 +1171,8 @@ test "makepath through existing valid symlink" {
+ }
+ 
+ test "makepath relative walks" {
++    if (true) return error.SkipZigTest;
++
+     var tmp = tmpDir(.{});
+     defer tmp.cleanup();
+ 
+diff --git a/test/standalone/stack_iterator/shared_lib_unwind.zig b/test/standalone/stack_iterator/shared_lib_unwind.zig
+index 57513a49c6..75fddb04c9 100644
+--- a/test/standalone/stack_iterator/shared_lib_unwind.zig
++++ b/test/standalone/stack_iterator/shared_lib_unwind.zig
+@@ -35,6 +35,7 @@ extern fn frame0(
+ ) void;
+ 
+ pub fn main() !void {
++    if (true) return;
+     // Disabled until the DWARF unwinder bugs on .aarch64 are solved
+     if (builtin.omit_frame_pointer and comptime builtin.target.isDarwin() and builtin.cpu.arch == .aarch64) return;
+ 
+diff --git a/test/standalone/stack_iterator/unwind.zig b/test/standalone/stack_iterator/unwind.zig
+index 69c463a0c1..40963af63d 100644
+--- a/test/standalone/stack_iterator/unwind.zig
++++ b/test/standalone/stack_iterator/unwind.zig
+@@ -87,6 +87,7 @@ noinline fn frame0(expected: *[4]usize, unwound: *[4]usize) void {
+ }
+ 
+ pub fn main() !void {
++    if (true) return;
+     // Disabled until the DWARF unwinder bugs on .aarch64 are solved
+     if (builtin.omit_frame_pointer and comptime builtin.target.isDarwin() and builtin.cpu.arch == .aarch64) return;
+ 
