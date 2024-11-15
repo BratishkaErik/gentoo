@@ -225,7 +225,7 @@ _zig_set_zbs_uris
 # Returns number of jobs from ZBS_ARGS_EXTRA or MAKEOPTS.
 # If there is none, defaults to number of available processing units.
 zig_get_jobs() {
-	local all_args="${ZBS_ARGS_EXTRA} ${MAKEOPTS}"
+	local all_args="${MAKEOPTS} ${ZBS_ARGS_EXTRA}"
 	local default_jobs="$(get_nproc)"
 	local jobs="$(makeopts_jobs "${all_args}" "${default_jobs}")"
 
