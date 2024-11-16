@@ -449,8 +449,10 @@ zig_src_prepare() {
 	# because ebuild might have fetched packages using live_fetch
 	# instead.
 	local -a packages=()
-	readarray -d '' -t packages < <(find "${system_dir}" -mindepth 1 \
-		-maxdepth 1 -type d -print0 2> /dev/null)
+	readarray -d '' -t packages < <(
+		find "${system_dir}" -type d -print0 \
+		-mindepth 1 -maxdepth 1 2> /dev/null
+	)
 	local count="${#packages[@]}"
 
 	if [[ "${count}" -gt 0 ]]; then
