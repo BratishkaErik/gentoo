@@ -7,10 +7,13 @@ source tests-common.sh || exit
 
 inherit zig-utils
 
-# Set to true if you want to test compilation and running under QEMU.
-# Assuming "zig" is present in path and qemu binfmt is enabled.
-# Programs compiled for CPUs marked with ":no-run" crashed in QEMU.
-if false; then
+# Set ZIG_TEST_COMPILATION env-var to "1" if you want to test binary
+# compilation and running under QEMU. Assumes "zig" is present in PATH
+# and qemu binfmt is enabled.
+#
+# If CPU is marked with ":no-run", it means program compiled for it
+# successfully but crashed when running under QEMU.
+if [[ "${ZIG_TEST_COMPILATION:-0}" -eq 1 ]]; then
 	MY_WORKDIR="$(mktemp -d)"
 	my_cleanup() {
 		popd > /dev/null
