@@ -250,21 +250,6 @@ zig_get_jobs() {
 # that args are available as early as possible, so that ebuilds
 # could use them in steps like "src_unpack" if neccessary, while
 # still having verbosity and amount of jobs from user respected.
-#
-#
-# TODO: currently this function enables "--search-prefix" (1) and
-# "--sysroot" (2) only when cross-compiling, should be fixed to
-# unconditionally enabling it.
-#
-# For solving (1) this patch should be reworked and upstreamed:
-# https://paste.sr.ht/~bratishkaerik/2ddffe2bf0f8f9d6dfb60403c2e9560334edaa88
-#
-# (2)
-# "--sysroot" should be passed together with "--search-prefix" above,
-# if we pass only "--sysroot" it gives these errors:
-# @CODE
-# error: unable to find dynamic system library 'zstd' using strategy 'paths_first'. searched paths: none
-# @CODE
 zig_init_base_args() {
 	[[ "${ZBS_ARGS_BASE}" ]] && return
 
@@ -312,12 +297,39 @@ zig_init_base_args() {
 		ZBS_ARGS_BASE+=( --summary all --verbose )
 	fi
 
-	if tc-is-cross-compiler; then
-		ZBS_ARGS_BASE+=(
-			--search-prefix "${ESYSROOT}/usr/"
-			--sysroot "${ESYSROOT}/"
-		)
+	# UPSTREAM replace setup below when/if this PR is merged:
+	# https://github.com/ziglang/zig/pull/22552
+
+	# To properly support Gentoo Prefix and cross-compilation with
+	# system libraries linked by build.zig, we need to pass some search
+	# paths to them. `search-prefix` option is unfortunately not very
+	# flexible: it hardcodes searching "bin", "lib" and "include"
+	# sub-directories inside of passed directory.
+
+	# Most problematic here is hardcoded "lib" sub-directory, since on
+	# 64-bit arches in Gentoo "${ESYSROOT}/usr/lib/" can contain
+	# 32-bit libraries, which can not be mixed with 64-bit binaries:
+	# error: ld.lld: /usr/lib/libcurl.so is incompatible with elf_x86_64
+
+	# Therefore, we mimic search prefix by making all 3 sub-directories
+	# as symlinks to real content instead.
+
+	ZBS_ARGS_BASE+=( --sysroot "${ESYSROOT}/" )
+
+	local fake_prefix="${T}/eclass_search_prefix_1"
+
+	mkdir "${fake_prefix}" || die
+	ln -s "${BROOT}/usr/bin/" "${fake_prefix}/bin" || die
+	ln -s "${ESYSROOT}/usr/$(get_libdir)/" "${fake_prefix}/lib" || die
+	ln -s "${ESYSROOT}/usr/include/" "${fake_prefix}/include" || die
+
+	if ver_test "${ZIG_SLOT}" -ge "0.14"; then
+		# Must be relative here, so that "bin" symlink works correctly,
+		# ld-linux resolving works consistently and RPATH issue is avoided.
+		fake_prefix="$(realpath --relative-to="${BUILD_DIR}" "${fake_prefix}" || die)"
 	fi
+
+	ZBS_ARGS_BASE+=( --search-prefix "${fake_prefix}" )
 }
 
 # @FUNCTION: zig_pkg_setup

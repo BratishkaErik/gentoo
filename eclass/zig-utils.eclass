@@ -555,11 +555,37 @@ zig-utils_setup() {
 	fi
 
 	: "${ZIG_CPU:=$(zig-utils_c_env_to_zig_cpu "${CHOST}" "${CFLAGS}")}"
-	if tc-is-cross-compiler; then
-		: "${ZIG_TARGET:=$(zig-utils_c_env_to_zig_target "${CHOST}" "${CFLAGS}")}"
-	else
-		: "${ZIG_TARGET:=native}"
+
+	if [[ -z "${ZIG_TARGET}" ]]; then
+		# Always pass target in full expanded form, even if it can be "native".
+		# This:
+		# 1) avoids unwanted libc detection by Zig using `env` binary inspection
+		# (fixed by passing all information by ourselves),
+		# 2) skips some default paths for binaries/libraries (fixed in zig.eclass
+		# by passing `--search-prefix`).
+		ZIG_TARGET="$(zig-utils_c_env_to_zig_target "${CHOST}" "${CFLAGS}")"
+
+		if [[ "${ZIG_TARGET}" == *-gnu* ]]; then
+			# For glibc, also pass concrete version, so that Zig code
+			# which uses `std.c` variables or functions (such as
+			# `versionCheck`) works correctly.
+			# Zig does not use ABI version for other libc.
+			local glibc_version=$(best_version -d sys-libs/glibc)
+			glibc_version=${glibc_version##"sys-libs/glibc-"}
+			glibc_version=$(ver_cut 1-2 ${glibc_version})
+
+			# Cap glibc version to one Zig knows about, to avoid errors like:
+			# warning: zig cannot build new glibc version 2.40.0; providing instead 2.39.0
+			# It matters only for comptime checkings, libc files are provided by us.
+			if ver_test "${ZIG_SLOT}" -gt "0.14" && ver_test ${glibc_version} -gt 2.41; then
+				glibc_version=2.41
+			elif ver_test "${ZIG_SLOT}" -eq "0.13" && ver_test ${glibc_version} -gt 2.39; then
+				glibc_version=2.39
+			fi
+			ZIG_TARGET+=".${glibc_version}"
+		fi
 	fi
+
 	declare -g ZIG_CPU ZIG_TARGET
 
 	einfo "ZIG_EXE:    \"${ZIG_EXE}\""
