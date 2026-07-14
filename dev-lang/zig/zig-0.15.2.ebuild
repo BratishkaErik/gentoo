@@ -84,6 +84,17 @@ pkg_setup() {
 	declare -r -g ZIG_VER="${PV}"
 	ZIG_EXE="not-applicable" zig_pkg_setup
 
+	# Bugs #966120, #975398
+	# Disable affected tools.
+	# 1. `zig2.c` (generated during build) is too big and nested,
+	# causing OOM crashes with clang-format, ccache, distcc etc.
+	# 2. Zig has its own internal caching system.
+	# The majority of the ebuild time is spent inside Zig's
+	# toolchain, which these external tools do not support.
+	# Thus, enabling them provides no real benefit.
+	export CCACHE_DISABLE=1
+	export DISTCC_HOSTS=localhost
+
 	declare -r -g ZIG_SYS_INSTALL_DEST="/usr/$(get_libdir)/zig/${PV}"
 
 	if use llvm; then
