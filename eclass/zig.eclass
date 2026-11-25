@@ -155,6 +155,97 @@ _zig_set_zbs_uris() {
 }
 _zig_set_zbs_uris
 
+# @ECLASS_VARIABLE: ZBS_PACKAGES
+# @DEFAULT_UNSET
+# @DESCRIPTION:
+# Bash associative array mapping short local aliases to SRC_URI entries
+# ("<url>" or "<url> -> <distfile>") for Zig dependencies.
+#
+# To fetch a package, include "${ZBS_PACKAGES[alias]}" in SRC_URI,
+# either unconditionally or inside a USE-conditional block.  Entries not
+# listed in SRC_URI are not downloaded.
+#
+# During src_unpack, zig_src_unpack unpacks only the packages enabled in
+# SRC_URI for the current build.
+#
+# Unlike ZBS_DEPENDENCIES, this variable may be set after inheriting
+# zig.eclass.
+#
+# Mutually exclusive with ZBS_DEPENDENCIES.
+#
+# Example:
+# @CODE
+# inherit zig
+#
+# declare -g -r -A ZBS_PACKAGES=(
+# 	[pixman]='
+# 		https://codeberg.org/ifreund/zig-pixman/archive/v0.3.0.tar.gz
+# 			-> pixman-0.3.0-<hash>.tar.gz
+# 	'
+# 	[xkbcommon]='
+# 		https://codeberg.org/ifreund/zig-xkbcommon/archive/v0.5.0.tar.gz
+# 			-> xkbcommon-0.5.0-<hash>.tar.gz
+# 	'
+# )
+#
+# SRC_URI="
+# 	https://example.org/${P}.tar.gz
+# 	${ZBS_PACKAGES[pixman]}
+# 	X? ( ${ZBS_PACKAGES[xkbcommon]} )
+# "
+# @CODE
+
+# @ECLASS_VARIABLE: ZBS_BUNDLED_PACKAGES
+# @DEFAULT_UNSET
+# @DESCRIPTION:
+# Optional Bash indexed array of bundled Zig package filenames.
+#
+# A bundled package is a Zig dependency archive that is not downloaded
+# directly via ZBS_PACKAGES, but is unpacked into ${WORKDIR} from
+# another archive in SRC_URI (for example, a vendor bundle or the
+# upstream source tarball).
+#
+# During src_unpack, zig_src_unpack unpacks each listed archive found in
+# ${WORKDIR}.  Listed archives that are not present in ${WORKDIR} are
+# skipped.
+#
+# Unlike ZBS_DEPENDENCIES, this variable may be set after inheriting
+# zig.eclass.
+#
+# Mutually exclusive with ZBS_DEPENDENCIES.
+#
+# Example:
+# @CODE
+# declare -g -r -a ZBS_BUNDLED_PACKAGES=(
+# 	aro-0.0.0-<hash>.tar.gz
+# 	zigimg-0.1.0-<hash>.tar.gz
+# )
+# @CODE
+
+# @FUNCTION: _zig_extract_pkg_filename
+# @INTERNAL
+# @USAGE: <src_uri_entry>
+# @DESCRIPTION:
+# Extracts the distfile name from a ZBS_PACKAGES entry ("<url>" or
+# "<url> -> <distfile>"), ignoring extra whitespace.
+_zig_extract_pkg_filename() {
+	local -a tokens=()
+	IFS=$' \t\n' read -r -d '' -a tokens <<< "${1}" || true
+	case ${#tokens[@]} in
+		1)
+			printf '%s\n' "${tokens[0]##*/}"
+			;;
+		3)
+			[[ ${tokens[1]} == "->" ]] ||
+				die "${ECLASS}: invalid ZBS_PACKAGES entry: ${1}"
+			printf '%s\n' "${tokens[2]}"
+			;;
+		*)
+			die "${ECLASS}: invalid ZBS_PACKAGES entry: ${1}"
+			;;
+	esac
+}
+
 # @ECLASS_VARIABLE: my_zbs_args
 # @DEFAULT_UNSET
 # @DESCRIPTION:
@@ -465,34 +556,16 @@ zig_live_fetch() {
 	popd > /dev/null || die
 }
 
-# @FUNCTION: zig_src_unpack
+# @FUNCTION: _zig_fetch_deps
+# @INTERNAL
+# @USAGE: <distfile>...
 # @DESCRIPTION:
-# Unpacks every archive in SRC_URI and ZBS_DEPENDENCIES,
-# in that order.  Adds build file path to ZBS_BASE_ARGS.
-zig_src_unpack() {
-	# Thanks to Alfred Wingate "parona" for inspiration here:
-	# https://gitlab.com/Parona/parona-overlay/-/blob/874dcfe03116574a33ed51f469cc993e98db1fa2/eclass/zig.eclass
-
-	ZBS_ARGS_BASE+=( --build-file "${S}/build.zig" )
-
-	if [[ "${#ZBS_DEPENDENCIES_SRC_URI}" -eq 0 ]]; then
-		default_src_unpack
+# Unpacks the given Zig dependency archives from ${WORKDIR} or ${DISTDIR}
+# into the local package store using "ezig fetch".
+_zig_fetch_deps() {
+	if [[ ${#} -eq 0 ]]; then
 		return
 	fi
-
-	local zig_deps=()
-	for dependency in "${!ZBS_DEPENDENCIES[@]}"; do
-		zig_deps+=("${dependency}")
-	done
-
-	# First unpack non-Zig dependencies, so that
-	# tarball with all Git dependencies tarballs is unpacked early.
-	local dist
-	for dist in ${A}; do
-		if ! has "${dist}" "${zig_deps[@]}"; then
-			unpack "${dist}"
-		fi
-	done
 
 	# Now unpack all Zig dependencies, including those that are
 	# now unpacked from tarball-tarball.
@@ -511,7 +584,7 @@ zig_src_unpack() {
 
 		# `touch` necessary only for 0.16, but it won't hurt for 0.17+.
 		touch build.zig || die
-		for zig_dep in "${zig_deps[@]}"; do
+		for zig_dep in "${@}"; do
 			# Hide now-spammy hash from stdout
 			if [[ -f "${WORKDIR}/${zig_dep}" ]]; then
 				ezig fetch --save-exact="${zig_dep##-*}" "${WORKDIR}/${zig_dep}" > /dev/null
@@ -528,7 +601,7 @@ zig_src_unpack() {
 		# Folder packages: saved into "${WORKDIR}/zig-pkg/" (because hardcoded to local zig-pkg)
 		# Compacted packages: saved into "${ZIG_GLOBAL_CACHE_DIR}/p/"
 	else
-		for zig_dep in "${zig_deps[@]}"; do
+		for zig_dep in "${@}"; do
 			# Hide now-spammy hash from stdout
 			ezig fetch --global-cache-dir "${ZBS_ECLASS_DIR}/" \
 				"${DISTDIR}/${zig_dep}" > /dev/null
@@ -539,7 +612,104 @@ zig_src_unpack() {
 		# Compacted packages: don't exist.
 	fi
 
-	einfo "ZBS: ${#zig_deps[@]} dependencies unpacked"
+	einfo "ZBS: ${#} dependencies unpacked"
+}
+
+# @FUNCTION: _zig_unpack_legacy_deps
+# @INTERNAL
+# @DESCRIPTION:
+# Unpacks non-Zig archives from ${A} and fetches legacy ZBS_DEPENDENCIES.
+_zig_unpack_legacy_deps() {
+	local -a zig_deps=()
+	local dependency dist
+
+	for dependency in "${!ZBS_DEPENDENCIES[@]}"; do
+		zig_deps+=( "${dependency}" )
+	done
+
+	# First unpack non-Zig dependencies, so that
+	# tarball with all Git dependencies tarballs is unpacked early.
+	for dist in ${A}; do
+		if ! has "${dist}" "${zig_deps[@]}"; then
+			unpack "${dist}"
+		fi
+	done
+
+	_zig_fetch_deps "${zig_deps[@]}"
+}
+
+# @FUNCTION: _zig_unpack_zbs_packages
+# @INTERNAL
+# @DESCRIPTION:
+# Unpacks non-Zig archives from ${A} and fetches active ZBS_PACKAGES and
+# ZBS_BUNDLED_PACKAGES.
+_zig_unpack_zbs_packages() {
+	local -a zig_deps=()
+	local -A zbs_pkg_set=()
+	local entry fname dist bundled
+
+	for entry in "${ZBS_PACKAGES[@]}"; do
+		fname="$(_zig_extract_pkg_filename "${entry}")" || die
+		zbs_pkg_set[${fname}]=1
+	done
+
+	# First unpack non-Zig archives (project sources, patches, vendor bundles)
+	# and collect only the Zig packages actually selected in ${A}.
+	for dist in ${A}; do
+		if [[ -v zbs_pkg_set[${dist}] ]]; then
+			zig_deps+=( "${dist}" )
+		else
+			unpack "${dist}"
+		fi
+	done
+
+	for bundled in "${ZBS_BUNDLED_PACKAGES[@]}"; do
+		if [[ -f "${WORKDIR}/${bundled}" ]]; then
+			zig_deps+=( "${bundled}" )
+		fi
+	done
+
+	_zig_fetch_deps "${zig_deps[@]}"
+}
+
+# @FUNCTION: zig_src_unpack
+# @DESCRIPTION:
+# Unpacks every archive in SRC_URI and Zig Build System dependencies
+# (from ZBS_DEPENDENCIES or ZBS_PACKAGES / ZBS_BUNDLED_PACKAGES),
+# in that order.  Adds build file path to ZBS_ARGS_BASE.
+zig_src_unpack() {
+	# Thanks to Alfred Wingate "parona" for inspiration here:
+	# https://gitlab.com/Parona/parona-overlay/-/blob/874dcfe03116574a33ed51f469cc993e98db1fa2/eclass/zig.eclass
+
+	ZBS_ARGS_BASE+=( --build-file "${S}/build.zig" )
+
+	local has_legacy=0 has_packages=0 has_bundled=0
+	[[ ${#ZBS_DEPENDENCIES[@]} -gt 0 ]] && has_legacy=1
+	if declare -p ZBS_PACKAGES &>/dev/null; then
+		[[ ${ZBS_PACKAGES@a} == *A* ]] ||
+			die "${ECLASS}: ZBS_PACKAGES must be an associative array"
+		[[ ${#ZBS_PACKAGES[@]} -gt 0 ]] && has_packages=1
+	fi
+	if declare -p ZBS_BUNDLED_PACKAGES &>/dev/null; then
+		[[ ${ZBS_BUNDLED_PACKAGES@a} == *a* ]] ||
+			die "${ECLASS}: ZBS_BUNDLED_PACKAGES must be an indexed array"
+		[[ ${#ZBS_BUNDLED_PACKAGES[@]} -gt 0 ]] && has_bundled=1
+	fi
+
+	if [[ ${has_legacy} -eq 1 && ( ${has_packages} -eq 1 || ${has_bundled} -eq 1 ) ]]; then
+		die "${ECLASS}: cannot use ZBS_DEPENDENCIES together with ZBS_PACKAGES or ZBS_BUNDLED_PACKAGES"
+	fi
+
+	if [[ ${has_legacy} -eq 0 && ${has_packages} -eq 0 && ${has_bundled} -eq 0 ]]; then
+		default_src_unpack
+		return
+	fi
+
+	if [[ ${has_legacy} -eq 1 ]]; then
+		_zig_unpack_legacy_deps
+	else
+		_zig_unpack_zbs_packages
+	fi
 }
 
 # @FUNCTION: zig_live_src_unpack
